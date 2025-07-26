@@ -151,7 +151,7 @@ class TransaksiResource extends Resource
             ->actions([
                 Tables\Actions\ViewAction::make(),
                 // Admin bisa edit, kasir tidak
-                Tables\Actions\EditAction::make()->visible(fn() => auth()->user()->role === 'admin'),
+                Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make()->visible(fn() => auth()->user()->role === 'admin'),
             ])
             ->bulkActions([
