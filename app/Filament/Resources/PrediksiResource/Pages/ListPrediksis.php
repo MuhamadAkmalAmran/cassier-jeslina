@@ -97,4 +97,9 @@ class ListPrediksis extends ListRecords
                 })
         ];
     }
+
+    public function getTitle(): string
+    {
+        return 'Daftar Prediksi';
+    }
 }

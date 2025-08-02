@@ -16,4 +16,8 @@ class ListTransaksis extends ListRecords
             Actions\CreateAction::make(),
         ];
     }
+    public function getTitle(): string
+    {
+        return 'Daftar Transaksi';
+    }
 }
