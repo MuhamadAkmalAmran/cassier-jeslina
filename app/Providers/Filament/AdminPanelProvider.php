@@ -30,7 +30,8 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('')
             ->login()
-            ->profile()
+            ->profile(EditProfile::class)
+            ->brandName('Js Cassier')
             ->colors([
                 'primary' => Color::Amber,
             ])

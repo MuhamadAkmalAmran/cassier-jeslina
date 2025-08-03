@@ -3,15 +3,12 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\UserResource\Pages;
-use App\Filament\Resources\UserResource\RelationManagers;
 use App\Models\User;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Support\Facades\Hash;
 
 class UserResource extends Resource
@@ -36,8 +33,16 @@ class UserResource extends Resource
                     ->placeholder('Kosongkan jika tidak ingin mengubah password')
                     ->dehydrateStateUsing(fn ($state) => Hash::make($state))
                     ->dehydrated(fn ($state) => filled($state))
-                    ->required(fn (string $context): bool => $context === 'create'),
+                    ->minLength(8, 'Password minimal 8 karakter')
+                    ->required(fn (string $context): bool => $context === 'create')
                     // ->hiddenOn('edit'),
+                    ->afterStateHydrated(function (Forms\Components\TextInput $component, string $context) {
+                        // Hanya jalankan logika ini saat di halaman 'edit'
+                        if ($context === 'edit') {
+                            // Secara paksa atur state (nilai) komponen ini menjadi null
+                            $component->state(null);
+                        }
+                    }),
                 Forms\Components\Select::make('role')
                     ->options([
                         'admin' => 'Admin',
