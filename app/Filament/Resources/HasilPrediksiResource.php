@@ -23,7 +23,7 @@ class HasilPrediksiResource extends Resource
         return $form
             ->schema([
                 Forms\Components\TextInput::make('prediksi_id')->disabled(),
-                Forms\Components\TextInput::make('penjualan_aktual')->disabled(),
+                Forms\Components\TextInput::make('penjualan_aktual')->disabled()->nullable(),
                 Forms\Components\TextInput::make('stok_aktual')->disabled(),
                 Forms\Components\TextInput::make('prediksi_stok')->disabled(),
             ]);
@@ -66,7 +66,7 @@ class HasilPrediksiResource extends Resource
 
                 Infolists\Components\Section::make('Hasil Perhitungan')
                     ->schema([
-                        Infolists\Components\TextEntry::make('penjualan_aktual')->label('Penjualan Aktual Bulan Lalu'),
+                        Infolists\Components\TextEntry::make('penjualan_aktual')->label('Penjualan Aktual'),
                         Infolists\Components\TextEntry::make('stok_aktual')->label('Stok Saat Ini'),
                         Infolists\Components\TextEntry::make('prediksi_stok')->label('Prediksi Penjualan Bulan Depan')->weight('bold'),
                     ])->columns(3),

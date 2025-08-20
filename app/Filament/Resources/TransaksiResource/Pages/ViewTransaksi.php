@@ -15,6 +15,18 @@ class ViewTransaksi extends ViewRecord
 {
     protected static string $resource = TransaksiResource::class;
 
+    protected function getHeaderActions(): array
+    {
+        return [
+            // Tombol "Kembali" baru
+            Actions\Action::make('back')
+                ->label('Kembali')
+                ->iconPosition('start')
+                ->color('gray') // Beri warna agar tidak terlalu menonjol
+                ->url($this->getResource()::getUrl('index')),
+        ];
+    }
+
     public function infolist(Infolist $infolist): Infolist
     {
         return $infolist

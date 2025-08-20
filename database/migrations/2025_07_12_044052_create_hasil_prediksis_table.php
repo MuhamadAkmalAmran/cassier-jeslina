@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             // Relasi one-to-one dengan tabel prediksis
             $table->foreignId('prediksi_id')->constrained('prediksis')->onDelete('cascade');
-            $table->integer('penjualan_aktual');
+            $table->integer('penjualan_aktual')->nullable();
             $table->integer('stok_aktual');
             $table->integer('prediksi_stok');
             $table->date('tanggal');

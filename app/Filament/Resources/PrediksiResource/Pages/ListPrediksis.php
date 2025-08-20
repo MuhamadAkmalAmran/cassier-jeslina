@@ -11,6 +11,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Support\Facades\DB;
 use Filament\Forms;
+use Throwable;
 
 class ListPrediksis extends ListRecords
 {
@@ -39,61 +40,96 @@ class ListPrediksis extends ListRecords
                         ->required(),
                 ])
                 ->action(function (array $data) {
-                    // --- LOGIKA YANG SUDAH DISESUAIKAN ---
+                    try {
+                        DB::transaction(function () use ($data) {
+                            $barangId = $data['barang_id'];
+                            $barang = Barang::findOrFail($barangId);
 
-                    $barangId = $data['barang_id'];
-                    $barang = Barang::find($barangId);
-                    $periods = (int) $data['periode_data'];
+                            // convert pilihan periode menjadi angka (3, 6, 12)
+                            $periods = (int) filter_var($data['periode_data'], FILTER_SANITIZE_NUMBER_INT);
 
-                    // Kita akan memprediksi untuk bulan depan sebagai target utama
-                    $targetPredictionDate = Carbon::now()->addMonth()->startOfMonth();
+                            // target prediksi = bulan depan
+                            $targetPredictionDate = Carbon::now()->addMonth()->startOfMonth();
 
-                    // LANGKAH 1: Buat satu "Job" Prediksi utama
-                    $prediksiJob = Prediksi::create([
-                        'barang_id' => $barangId,
-                        'periode_data' => $data['periode_data'],
-                        'tanggal_prediksi' => $targetPredictionDate,
-                        'status' => 'Selesai',
-                    ]);
+                            // Buat job prediksi utama
+                            $prediksiJob = Prediksi::create([
+                                'barang_id' => $barangId,
+                                'periode_data' => $data['periode_data'],
+                                'tanggal_prediksi' => $targetPredictionDate,
+                                'status' => 'Selesai',
+                            ]);
 
-                    // LANGKAH 2: Lakukan perulangan untuk membuat BEBERAPA hasil prediksi
-                    // Loop ini akan berjalan untuk bulan target dan bulan-bulan sebelumnya
-                    for ($k = 0; $k < $periods; $k++) {
-                        $currentPredictionMonth = $targetPredictionDate->copy()->subMonths($k);
+                            // Simpan stok terkini sebagai basis
+                            $stokSekarang = $barang->jumlah_stok;
 
-                        // Kumpulkan data historis untuk bulan yang sedang dihitung
-                        $monthlySales = [];
-                        for ($i = 1; $i <= $periods; $i++) {
-                            $historyMonth = $currentPredictionMonth->copy()->subMonths($i);
-                            $sales = DB::table('barang_transaksi')
-                                ->where('barang_id', $barangId)
-                                ->whereBetween('created_at', [$historyMonth->copy()->startOfMonth(), $historyMonth->copy()->endOfMonth()])
-                                ->sum('jumlah');
-                            $monthlySales[] = $sales;
-                        }
+                            // Loop sebanyak periode
+                            for ($k = 0; $k < $periods; $k++) {
+                                $currentPredictionMonth = $targetPredictionDate->copy()->subMonths($k);
 
-                        $prediksi_stok = ($periods > 0) ? round(array_sum($monthlySales) / $periods) : 0;
+                                // === Hitung prediksi stok (rata-rata penjualan n bulan ke belakang) ===
+                                $monthlySales = [];
+                                for ($i = 1; $i <= $periods; $i++) {
+                                    $historyMonth = $currentPredictionMonth->copy()->subMonths($i);
+                                    $sales = DB::table('barang_transaksi')
+                                        ->where('barang_id', $barangId)
+                                        ->whereBetween('created_at', [
+                                            $historyMonth->copy()->startOfMonth(),
+                                            $historyMonth->copy()->endOfMonth()
+                                        ])
+                                        ->sum('jumlah');
+                                    $monthlySales[] = $sales;
+                                }
+                                $prediksi_stok = ($periods > 0) ? round(array_sum($monthlySales) / $periods) : 0;
 
-                        $lastMonth = $currentPredictionMonth->copy()->subMonth();
-                        $penjualan_aktual_terakhir = DB::table('barang_transaksi')
-                            ->where('barang_id', $barangId)
-                            ->whereBetween('created_at', [$lastMonth->copy()->startOfMonth(), $lastMonth->copy()->endOfMonth()])
-                            ->sum('jumlah');
+                                // === Ambil penjualan aktual hanya jika bulan <= sekarang ===
+                                if ($currentPredictionMonth->greaterThan(Carbon::now()->startOfMonth())) {
+                                    $penjualan_aktual_terakhir = null;
+                                } else {
+                                    $lastMonth = $currentPredictionMonth->copy()->subMonth();
+                                    $penjualan_aktual_terakhir = DB::table('barang_transaksi')
+                                        ->where('barang_id', $barangId)
+                                        ->whereBetween('created_at', [
+                                            $lastMonth->copy()->startOfMonth(),
+                                            $lastMonth->copy()->endOfMonth()
+                                        ])
+                                        ->sum('jumlah');
+                                }
 
-                        // LANGKAH 3: Buat satu baris hasil prediksi untuk bulan ini
-                        $prediksiJob->hasil()->create([
-                            'tanggal' => $currentPredictionMonth->toDateString(),
-                            'penjualan_aktual' => $penjualan_aktual_terakhir,
-                            'stok_aktual' => $barang->jumlah_stok,
-                            'prediksi_stok' => $prediksi_stok,
-                        ]);
+                                // === Hitung stok aktual bulan prediksi ===
+                                $totalPenjualanSetelah = DB::table('barang_transaksi')
+                                    ->where('barang_id', $barangId)
+                                    ->whereBetween('created_at', [
+                                        $currentPredictionMonth->copy()->startOfMonth(),
+                                        now()->endOfMonth()
+                                    ])
+                                    ->sum('jumlah');
+
+                                $stokAktual = $stokSekarang + $totalPenjualanSetelah;
+
+                                // Simpan hasil prediksi
+                                $prediksiJob->hasil()->create([
+                                    'tanggal' => $currentPredictionMonth->toDateString(),
+                                    'penjualan_aktual' => $penjualan_aktual_terakhir ?? 0,
+                                    'stok_aktual' => $stokAktual,
+                                    'prediksi_stok' => $prediksi_stok,
+                                ]);
+                            }
+                        });
+
+                        Notification::make()
+                            ->title("Prediksi berhasil dibuat")
+                            ->body("Silakan lihat hasil prediksi yang telah dibuat.")
+                            ->success()
+                            ->send();
+
+                    } catch (Throwable $e) {
+                        // Kalau ada error, rollback otomatis dan tampilkan notifikasi gagal
+                        Notification::make()
+                            ->title("Prediksi gagal")
+                            ->body("Terjadi kesalahan: " . $e->getMessage())
+                            ->danger()
+                            ->send();
                     }
-
-                    Notification::make()
-                        ->title("Prediksi untuk '{$barang->nama_barang}' berhasil dibuat")
-                        ->body("Silakan lihat hasil prediksi yang telah dibuat.")
-                        ->success()
-                        ->send();
                 })
         ];
     }

@@ -62,19 +62,12 @@ class PrediksiResource extends Resource
                 Tables\Columns\TextColumn::make('periode_data')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('tanggal_prediksi')
-                    ->date()
+                    ->date('F Y')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('status')
                     ->searchable(),
-                Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                Tables\Columns\TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
             ])
+            ->defaultSort('created_at', 'desc')
             ->filters([
                 //
             ])
@@ -114,15 +107,15 @@ class PrediksiResource extends Resource
     }
 
     public static function infolist(Infolist $infolist): Infolist
-{
-    return $infolist
-        ->schema([
-            Infolists\Components\Section::make('Detail Job Prediksi')
-                ->schema([
-                    Infolists\Components\TextEntry::make('barang.nama_barang'),
-                    Infolists\Components\TextEntry::make('periode_data'),
-                    Infolists\Components\TextEntry::make('tanggal_prediksi')->date('F Y'),
-                ])->columns(3),
-        ]);
-}
+    {
+        return $infolist
+            ->schema([
+                Infolists\Components\Section::make('Detail Prediksi')
+                    ->schema([
+                        Infolists\Components\TextEntry::make('barang.nama_barang'),
+                        Infolists\Components\TextEntry::make('periode_data'),
+                        Infolists\Components\TextEntry::make('tanggal_prediksi')->date('F Y'),
+                    ])->columns(3),
+            ]);
+    }
 }
