@@ -125,34 +125,95 @@ class TransaksiResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('id')->label('ID Transaksi')->sortable(),
-                Tables\Columns\TextColumn::make('kasir.name')->searchable()->sortable(),
-                                Tables\Columns\TextColumn::make('barangs.nama_barang')
+                Tables\Columns\TextColumn::make('kasir.name')
+                    ->label('Kasir')
+                    ->searchable()
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('barangs.nama_barang')
                     ->label('Daftar Barang')
                     ->formatStateUsing(function ($state, $record) {
                         // Ambil semua nama barang dari relasi dan gabungkan dengan koma
                         return $record->barangs->pluck('nama_barang')->implode(', ');
                     })
+                    ->searchable(query: function ($query, string $search) {
+                        // PERBAIKAN: Search berdasarkan nama barang dalam relasi many-to-many
+                        return $query->whereHas('barangs', function ($q) use ($search) {
+                            $q->where('nama_barang', 'like', "%{$search}%");
+                        });
+                    })
                     ->limit(40) // Batasi panjang teks agar UI rapi
                     ->tooltip(function ($record) { // Tampilkan daftar lengkap saat di-hover
                         return $record->barangs->pluck('nama_barang')->implode("\n");
                     }),
-                Tables\Columns\TextColumn::make('total_harga_barang')->money('IDR')->sortable(),
-                Tables\Columns\TextColumn::make('pembayaran.dibayar')->money('IDR')->sortable(),
-                Tables\Columns\TextColumn::make('created_at')->dateTime()->sortable(),
+                Tables\Columns\TextColumn::make('total_harga_barang')
+                    ->label('Total Harga')
+                    ->money('IDR')
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('pembayaran.dibayar')
+                    ->label('Dibayar')
+                    ->money('IDR')
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('created_at')
+                    ->label('Tanggal')
+                    ->dateTime('d/m/Y H:i')
+                    ->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
             ->filters([
-                //
+                // Filter berdasarkan kasir
+                Tables\Filters\SelectFilter::make('user_id')
+                    ->label('Kasir')
+                    ->relationship('kasir', 'name')
+                    ->searchable(),
+
+                // Filter berdasarkan barang
+                Tables\Filters\SelectFilter::make('barang')
+                    ->label('Barang')
+                    ->options(Barang::pluck('nama_barang', 'id'))
+                    ->query(function ($query, array $data) {
+                        if ($data['value']) {
+                            return $query->whereHas('barangs', function ($q) use ($data) {
+                                $q->where('barangs.id', $data['value']);
+                            });
+                        }
+                        return $query;
+                    })
+                    ->searchable(),
+
+                // Filter berdasarkan tanggal
+                Tables\Filters\Filter::make('created_at')
+                    ->form([
+                        Forms\Components\DatePicker::make('dari_tanggal'),
+                        Forms\Components\DatePicker::make('sampai_tanggal'),
+                    ])
+                    ->query(function ($query, array $data) {
+                        return $query
+                            ->when($data['dari_tanggal'], fn($q) => $q->whereDate('created_at', '>=', $data['dari_tanggal']))
+                            ->when($data['sampai_tanggal'], fn($q) => $q->whereDate('created_at', '<=', $data['sampai_tanggal']));
+                    })
+                    ->indicateUsing(function (array $data): array {
+                        $indicators = [];
+                        if ($data['dari_tanggal'] ?? null) {
+                            $indicators['dari_tanggal'] = 'Dari: ' . \Carbon\Carbon::parse($data['dari_tanggal'])->format('d/m/Y');
+                        }
+                        if ($data['sampai_tanggal'] ?? null) {
+                            $indicators['sampai_tanggal'] = 'Sampai: ' . \Carbon\Carbon::parse($data['sampai_tanggal'])->format('d/m/Y');
+                        }
+                        return $indicators;
+                    }),
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
                 // Admin bisa edit, kasir tidak
-                Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make()->visible(fn() => auth()->user()->role === 'admin'),
+                Tables\Actions\EditAction::make()
+                    ->visible(fn() => auth()->user()->role === 'admin'),
+                Tables\Actions\DeleteAction::make()
+                    ->visible(fn() => auth()->user()->role === 'admin'),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                    Tables\Actions\DeleteBulkAction::make()
+                        ->visible(fn() => auth()->user()->role === 'admin'),
                 ]),
             ]);
     }

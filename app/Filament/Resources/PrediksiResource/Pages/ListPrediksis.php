@@ -20,117 +20,95 @@ class ListPrediksis extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
-            Actions\Action::make('buat_prediksi')
-                ->label('Buat Prediksi Baru')
-                ->icon('heroicon-o-chart-bar')
-                ->form([
-                    Forms\Components\Select::make('barang_id')
-                        ->label('Pilih Barang')
-                        ->options(Barang::query()->pluck('nama_barang', 'id'))
-                        ->searchable()
-                        ->required(),
-                    Forms\Components\Select::make('periode_data')
-                        ->label('Gunakan Data Penjualan')
-                        ->options([
-                            '3-Bulan'  => '3 Bulan Terakhir',
-                            '6-Bulan'  => '6 Bulan Terakhir',
-                            '12-Bulan' => '1 Tahun Terakhir (12 Bulan)',
-                        ])
-                        ->default('3-Bulan')
-                        ->required(),
-                ])
-                ->action(function (array $data) {
-                    try {
-                        DB::transaction(function () use ($data) {
-                            $barangId = $data['barang_id'];
-                            $barang = Barang::findOrFail($barangId);
+            Actions\CreateAction::make(),
+        //     Actions\Action::make('buat_prediksi')
+        //         ->label('Buat Prediksi Baru')
+        //         ->icon('heroicon-o-chart-bar')
+        //         ->form([
+        //             Forms\Components\Select::make('barang_id')
+        //                 ->label('Pilih Barang')
+        //                 ->options(Barang::query()->pluck('nama_barang', 'id'))
+        //                 ->searchable()
+        //                 ->required(),
+        //             Forms\Components\Select::make('periode_data')
+        //                 ->label('Gunakan Data Penjualan')
+        //                 ->options([
+        //                     '3-Bulan'  => '3 Bulan Terakhir',
+        //                     '6-Bulan'  => '6 Bulan Terakhir',
+        //                     '12-Bulan' => '1 Tahun Terakhir (12 Bulan)',
+        //                 ])
+        //                 ->default('3-Bulan')
+        //                 ->required(),
+        //         ])
+        //         ->action(function (array $data) {
+        //             try {
+        //                 DB::transaction(function () use ($data) {
+        //                     $barangId = $data['barang_id'];
+        //                     $barang = Barang::findOrFail($barangId);
+        //                     $periods = (int) $data['periode_data'];
+        //                     $targetPredictionDate = Carbon::now()->addMonth()->startOfMonth();
 
-                            // convert pilihan periode menjadi angka (3, 6, 12)
-                            $periods = (int) filter_var($data['periode_data'], FILTER_SANITIZE_NUMBER_INT);
+        //                     $prediksiJob = Prediksi::create([
+        //                         'barang_id' => $barangId,
+        //                         'periode_data' => $data['periode_data'],
+        //                         'tanggal_prediksi' => $targetPredictionDate,
+        //                         'status' => 'Selesai',
+        //                     ]);
 
-                            // target prediksi = bulan depan
-                            $targetPredictionDate = Carbon::now()->addMonth()->startOfMonth();
+        //                     // --- PERUBAHAN UTAMA DI SINI ---
+        //                     // Loop untuk membuat (periode + 1) hasil: bulan target + bulan-bulan historisnya
+        //                     // Jika periode = 3, loop akan berjalan 4 kali (k=0, 1, 2, 3)
+        //                     for ($k = 0; $k <= $periods; $k++) {
+        //                         $currentPredictionMonth = $targetPredictionDate->copy()->subMonths($k);
 
-                            // Buat job prediksi utama
-                            $prediksiJob = Prediksi::create([
-                                'barang_id' => $barangId,
-                                'periode_data' => $data['periode_data'],
-                                'tanggal_prediksi' => $targetPredictionDate,
-                                'status' => 'Selesai',
-                            ]);
+        //                         // Kumpulkan data historis untuk bulan yang sedang dihitung
+        //                         $monthlySales = [];
+        //                         for ($i = 1; $i <= $periods; $i++) {
+        //                             $historyMonth = $currentPredictionMonth->copy()->subMonths($i);
+        //                             $sales = DB::table('barang_transaksi')
+        //                                 ->where('barang_id', $barangId)
+        //                                 ->whereBetween('created_at', [$historyMonth->copy()->startOfMonth(), $historyMonth->copy()->endOfMonth()])
+        //                                 ->sum('jumlah');
+        //                             $monthlySales[] = $sales;
+        //                         }
 
-                            // Simpan stok terkini sebagai basis
-                            $stokSekarang = $barang->jumlah_stok;
+        //                         $prediksi_stok = ($periods > 0) ? round(array_sum($monthlySales) / $periods) : 0;
 
-                            // Loop sebanyak periode
-                            for ($k = 0; $k < $periods; $k++) {
-                                $currentPredictionMonth = $targetPredictionDate->copy()->subMonths($k);
+        //                         $lastMonth = $currentPredictionMonth->copy()->subMonth();
+        //                         $penjualan_aktual_terakhir = DB::table('barang_transaksi')
+        //                             ->where('barang_id', $barangId)
+        //                             ->whereBetween('created_at', [$lastMonth->copy()->startOfMonth(), $lastMonth->copy()->endOfMonth()])
+        //                             ->sum('jumlah');
 
-                                // === Hitung prediksi stok (rata-rata penjualan n bulan ke belakang) ===
-                                $monthlySales = [];
-                                for ($i = 1; $i <= $periods; $i++) {
-                                    $historyMonth = $currentPredictionMonth->copy()->subMonths($i);
-                                    $sales = DB::table('barang_transaksi')
-                                        ->where('barang_id', $barangId)
-                                        ->whereBetween('created_at', [
-                                            $historyMonth->copy()->startOfMonth(),
-                                            $historyMonth->copy()->endOfMonth()
-                                        ])
-                                        ->sum('jumlah');
-                                    $monthlySales[] = $sales;
-                                }
-                                $prediksi_stok = ($periods > 0) ? round(array_sum($monthlySales) / $periods) : 0;
+        //                         $salesSinceThen = DB::table('barang_transaksi')
+        //                             ->where('barang_id', $barangId)
+        //                             ->where('created_at', '>', $currentPredictionMonth->copy()->endOfMonth())
+        //                             ->sum('jumlah');
+        //                         $stok_aktual = $barang->jumlah_stok + $salesSinceThen;
 
-                                // === Ambil penjualan aktual hanya jika bulan <= sekarang ===
-                                if ($currentPredictionMonth->greaterThan(Carbon::now()->startOfMonth())) {
-                                    $penjualan_aktual_terakhir = null;
-                                } else {
-                                    $lastMonth = $currentPredictionMonth->copy()->subMonth();
-                                    $penjualan_aktual_terakhir = DB::table('barang_transaksi')
-                                        ->where('barang_id', $barangId)
-                                        ->whereBetween('created_at', [
-                                            $lastMonth->copy()->startOfMonth(),
-                                            $lastMonth->copy()->endOfMonth()
-                                        ])
-                                        ->sum('jumlah');
-                                }
+        //                         // Buat satu baris hasil prediksi untuk bulan ini
+        //                         $prediksiJob->hasil()->create([
+        //                             'tanggal' => $currentPredictionMonth->toDateString(),
+        //                             'penjualan_aktual' => $penjualan_aktual_terakhir,
+        //                             'stok_aktual' => $stok_aktual,
+        //                             'prediksi_stok' => $prediksi_stok,
+        //                         ]);
+        //                     }
+        //                 });
 
-                                // === Hitung stok aktual bulan prediksi ===
-                                $totalPenjualanSetelah = DB::table('barang_transaksi')
-                                    ->where('barang_id', $barangId)
-                                    ->whereBetween('created_at', [
-                                        $currentPredictionMonth->copy()->startOfMonth(),
-                                        now()->endOfMonth()
-                                    ])
-                                    ->sum('jumlah');
-
-                                $stokAktual = $stokSekarang + $totalPenjualanSetelah;
-
-                                // Simpan hasil prediksi
-                                $prediksiJob->hasil()->create([
-                                    'tanggal' => $currentPredictionMonth->toDateString(),
-                                    'penjualan_aktual' => $penjualan_aktual_terakhir ?? 0,
-                                    'stok_aktual' => $stokAktual,
-                                    'prediksi_stok' => $prediksi_stok,
-                                ]);
-                            }
-                        });
-
-                        Notification::make()
-                            ->title("Prediksi berhasil dibuat")
-                            ->body("Silakan lihat hasil prediksi yang telah dibuat.")
-                            ->success()
-                            ->send();
-
-                    } catch (Throwable $e) {
-                        // Kalau ada error, rollback otomatis dan tampilkan notifikasi gagal
-                        Notification::make()
-                            ->title("Prediksi gagal")
-                            ->body("Terjadi kesalahan: " . $e->getMessage())
-                            ->danger()
-                            ->send();
-                    }
-                })
+        //                 Notification::make()
+        //                     ->title("Prediksi berhasil dibuat")
+        //                     ->body("Silakan lihat hasil prediksi yang telah dibuat.")
+        //                     ->success()
+        //                     ->send();
+        //             } catch (Throwable $e) {
+        //                 Notification::make()
+        //                     ->title("Prediksi gagal")
+        //                     ->body("Terjadi kesalahan: " . $e->getMessage())
+        //                     ->danger()
+        //                     ->send();
+        //             }
+        //         })
         ];
     }
 

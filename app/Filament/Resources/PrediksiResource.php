@@ -11,8 +11,10 @@ use Filament\Forms\Form;
 use Filament\Infolists\Infolist;
 use Filament\Infolists;
 use Filament\Resources\Resource;
+use Filament\Support\Enums\FontWeight;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Log;
 
 class PrediksiResource extends Resource
 {
@@ -33,22 +35,25 @@ class PrediksiResource extends Resource
             ->schema([
                 Forms\Components\Select::make('barang_id')
                     ->label('Barang')
-                    ->options(Barang::query()->pluck('nama_barang', 'id')) // <-- Gunakan ini
+                    ->options(Barang::query()->pluck('nama_barang', 'id'))
                     ->searchable()
                     ->required(),
                 Forms\Components\Select::make('periode_data')
                     ->label('Gunakan Data Penjualan')
                     ->options([
-                        '3-Bulan' => '3 Bulan Terakhir',
-                        '6-Bulan' => '6 Bulan Terakhir',
-                        '12-Bulan' => '12 Bulan Terakhir',
+                        3 => '3 Bulan Terakhir',
+                        6 => '6 Bulan Terakhir',
+                        12 => '12 Bulan Terakhir',
                     ])
-                    ->default('3-Bulan')
+                    ->default(3)
                     ->required(),
                 Forms\Components\DatePicker::make('tanggal_prediksi')
                     ->label('Prediksi untuk Bulan')
                     ->default(now()->addMonth()->startOfMonth())
                     ->required(),
+                // Tambahkan field status dengan default value
+                Forms\Components\Hidden::make('status')
+                    ->default('processing'),
             ]);
     }
 
@@ -57,29 +62,50 @@ class PrediksiResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('barang.nama_barang')
-                    ->numeric()
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('periode_data')
+                    ->label('Nama Barang')
+                    ->sortable()
                     ->searchable(),
+                Tables\Columns\TextColumn::make('periode_data')
+                    ->label('Periode Data')
+                    ->suffix(' bulan')
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('tanggal_prediksi')
+                    ->label('Bulan Prediksi')
                     ->date('F Y')
                     ->sortable(),
-                Tables\Columns\TextColumn::make('status')
+                Tables\Columns\BadgeColumn::make('status')
+                    ->label('Status')
+                    ->colors([
+                        'warning' => 'processing',
+                        'success' => 'completed',
+                        'danger' => 'failed',
+                    ])
                     ->searchable(),
+                Tables\Columns\TextColumn::make('created_at')
+                    ->label('Dibuat')
+                    ->dateTime('d/m/Y H:i')
+                    ->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
             ->filters([
-                //
+                Tables\Filters\SelectFilter::make('status')
+                    ->options([
+                        'processing' => 'Processing',
+                        'completed' => 'Completed',
+                        'failed' => 'Failed',
+                    ]),
+                Tables\Filters\SelectFilter::make('barang')
+                    ->relationship('barang', 'nama_barang')
+                    ->searchable(),
             ])
             ->actions([
                 Tables\Actions\Action::make('view_hasil')
                     ->label('Lihat Hasil')
                     ->icon('heroicon-o-chart-bar')
-                    // --- UBAH 'edit' MENJADI 'view' DI SINI ---
-                    ->url(fn(Prediksi $record): string => self::getUrl('view', ['record' => $record])),
+                    ->url(fn(Prediksi $record): string => self::getUrl('view', ['record' => $record]))
+                    ->visible(fn(Prediksi $record): bool => $record->status === 'Selesai'),
 
                 Tables\Actions\DeleteAction::make(),
-                // Tables\Actions\EditAction::make(),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
@@ -91,8 +117,7 @@ class PrediksiResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
-            RelationManagers\HasilRelationManager::class,
+            // RelationManagers\HasilRelationManager::class,
         ];
     }
 
@@ -110,12 +135,106 @@ class PrediksiResource extends Resource
     {
         return $infolist
             ->schema([
-                Infolists\Components\Section::make('Detail Prediksi')
+                // Section untuk informasi umum prediksi
+                Infolists\Components\Section::make('Informasi Prediksi')
                     ->schema([
-                        Infolists\Components\TextEntry::make('barang.nama_barang'),
-                        Infolists\Components\TextEntry::make('periode_data'),
-                        Infolists\Components\TextEntry::make('tanggal_prediksi')->date('F Y'),
-                    ])->columns(3),
+                        Infolists\Components\Grid::make(3)
+                            ->schema([
+                                Infolists\Components\TextEntry::make('barang.nama_barang')
+                                    ->label('Nama Barang'),
+                                Infolists\Components\TextEntry::make('periode_data')
+                                    ->label('Periode Data')
+                                    ->suffix(' bulan'),
+                                Infolists\Components\TextEntry::make('tanggal_prediksi')
+                                    ->label('Bulan Prediksi')
+                                    ->date('F Y'),
+                            ]),
+                    ]),
+
+                // Section untuk hasil prediksi utama (bulan yang diprediksi)
+                Infolists\Components\Section::make('Hasil Prediksi Utama')
+                    ->schema([
+                        Infolists\Components\Grid::make(3)
+                            ->schema([
+                                Infolists\Components\TextEntry::make('penjualan_bulan_lalu')
+                                    ->label('Penjualan Bulan Sebelumnya')
+                                    ->state(function (Prediksi $record) {
+                                        // Ambil data penjualan bulan sebelum bulan prediksi
+                                        $bulanSebelumnya = \Carbon\Carbon::parse($record->tanggal_prediksi)->subMonth();
+                                        $hasil = $record->hasil()->whereDate('tanggal', $bulanSebelumnya->toDateString())->first();
+                                        return $hasil?->penjualan_aktual ?? 0;
+                                    }),
+
+                                Infolists\Components\TextEntry::make('stok_saat_ini')
+                                    ->label('Stok Aktual Saat Ini')
+                                    ->state(function (Prediksi $record) {
+                                        // Ambil stok dari bulan prediksi
+                                        $hasil = $record->hasil()->whereDate('tanggal', $record->tanggal_prediksi)->first();
+                                        return $hasil?->stok_aktual ?? $record->barang->jumlah_stok;
+                                    }),
+
+                                Infolists\Components\TextEntry::make('prediksi_penjualan')
+                                    ->label('Prediksi Penjualan')
+                                    ->weight(FontWeight::Bold)
+                                    ->color('success')
+                                    ->state(function (Prediksi $record) {
+                                        // Ambil prediksi untuk bulan target
+                                        $hasil = $record->hasil()->whereDate('tanggal', $record->tanggal_prediksi)->first();
+                                        return $hasil?->prediksi_stok ?? 0;
+                                    }),
+                            ]),
+                    ])
+                    ->collapsible(),
+
+                // Section untuk tabel riwayat data perhitungan lengkap
+                Infolists\Components\Section::make('Hasil Prediksi')
+                    ->schema([
+                        Infolists\Components\RepeatableEntry::make('hasil')
+                            ->label('')
+                            ->schema([
+                                Infolists\Components\Grid::make(4)
+                                    ->schema([
+                                        Infolists\Components\TextEntry::make('tanggal')
+                                            ->label('Bulan')
+                                            ->formatStateUsing(function (string $state): string {
+                                                return \Carbon\Carbon::parse($state)->format('F Y');
+                                            })
+                                            ->weight('bold'),
+
+                                        Infolists\Components\TextEntry::make('penjualan_aktual')
+                                            ->label('Penjualan Aktual')
+                                            ->formatStateUsing(function ($state): string {
+                                                return $state === 0 ? '-' : number_format($state);
+                                            }),
+
+                                        Infolists\Components\TextEntry::make('stok_aktual')
+                                            ->label('Stok Aktual')
+                                            ->formatStateUsing(function ($state): string {
+                                                return number_format($state);
+                                            }),
+
+                                        Infolists\Components\TextEntry::make('prediksi_stok')
+                                            ->label('Prediksi Penjualan')
+                                            ->formatStateUsing(function ($state): string {
+                                                return number_format($state);
+                                            })
+                                            ->weight('bold')
+                                            ->color('success'),
+                                    ])
+                            ])
+                            ->state(function (Prediksi $record) {
+                                // Ambil SEMUA hasil termasuk bulan prediksi (4 bulan total)
+                                $results = $record->hasil()
+                                    ->orderBy('tanggal', 'asc') // Urutkan dari yang terlama
+                                    ->get();
+
+                                // Debug: Log jumlah hasil yang ditemukan
+                                Log::info("Found {$results->count()} results for prediksi ID {$record->id}");
+
+                                return $results->toArray();
+                            }),
+                    ])
+                    ->collapsible(),
             ]);
     }
 }
