@@ -45,14 +45,14 @@ class TransaksiResource extends Resource
                                         }),
                                     Forms\Components\TextInput::make('jumlah')
                                         ->required()
-                                        ->numeric()
-                                        ->minValue(1)
-                                        ->reactive(), // <-- PENTING
+                                        ->numeric(),
+                                        // ->live(debounce: 500), // <-- PENTING
                                     Forms\Components\TextInput::make('harga_satuan')
                                         ->required()
                                         ->numeric()
                                         ->prefix('Rp')
-                                        ->readOnly()
+                                        ->readOnly(),
+
                                 ])
                                 ->columns(3)
                                 ->defaultItems(1)
@@ -145,7 +145,7 @@ class TransaksiResource extends Resource
                     ->tooltip(function ($record) { // Tampilkan daftar lengkap saat di-hover
                         return $record->barangs->pluck('nama_barang')->implode("\n");
                     }),
-                Tables\Columns\TextColumn::make('total_harga_barang')
+                Tables\Columns\TextColumn::make('pembayaran.total_pembayaran')
                     ->label('Total Harga')
                     ->money('IDR')
                     ->sortable(),
