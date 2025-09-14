@@ -9,6 +9,15 @@ use Filament\Widgets\StatsOverviewWidget\Stat;
 
 class StatsOverview extends BaseWidget
 {
+    public function getColumnSpan(): int|string|array
+    {
+        return [
+            'default' => 12, // mobile = full
+            'md' => 12,      // tablet = full
+            'lg' => 12,      // desktop = full
+        ];
+    }
+
     protected function getStats(): array
     {
         // Menghitung total pendapatan khusus bulan ini

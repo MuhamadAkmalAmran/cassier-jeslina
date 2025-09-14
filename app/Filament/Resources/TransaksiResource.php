@@ -5,13 +5,17 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\TransaksiResource\Pages;
 use App\Models\Barang;
 use App\Models\Transaksi;
+use Closure;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Forms\Get;
 use Filament\Forms\Set;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class TransaksiResource extends Resource
 {
@@ -28,6 +32,39 @@ class TransaksiResource extends Resource
                 Forms\Components\Hidden::make('total_harga_barang'),
                 Forms\Components\Wizard::make([
                     Forms\Components\Wizard\Step::make('Pilih Barang')
+                        ->afterValidation(function (Get $get, Set $set) { // PERBAIKAN 2: Tambah Set parameter
+                            $items = $get('items');
+
+                            // PERBAIKAN 3: Validasi items tidak kosong
+                            if (empty($items) || !is_array($items)) {
+                                throw ValidationException::withMessages([
+                                    'items' => 'Minimal pilih satu barang.',
+                                ]);
+                            }
+
+                            foreach ($items as $key => $item) {
+                                // Skip item kosong
+                                if (empty($item['barang_id']) || empty($item['jumlah'])) {
+                                    continue;
+                                }
+
+                                $barang = Barang::find($item['barang_id']);
+                                if ($barang && $item['jumlah'] > $barang->jumlah_stok) {
+                                    Notification::make()
+                                        ->title('Stok Tidak Cukup!')
+                                        ->body("Stok untuk {$barang->nama_barang} tidak mencukupi. Sisa: {$barang->jumlah_stok}")
+                                        ->danger()
+                                        ->send();
+
+                                    throw ValidationException::withMessages([
+                                        "data.items.{$key}.jumlah" => "Stok untuk {$barang->nama_barang} tidak mencukupi. Sisa: {$barang->jumlah_stok}",
+                                    ]);
+                                }
+                            }
+
+                            // PERBAIKAN 4: Update total setelah validasi berhasil
+                            self::updateTotals($get, $set);
+                        })
                         ->schema([
                             Forms\Components\Repeater::make('items')
                                 ->schema([
@@ -36,33 +73,63 @@ class TransaksiResource extends Resource
                                         ->options(Barang::query()->where('jumlah_stok', '>', 0)->pluck('nama_barang', 'id'))
                                         ->required()
                                         ->searchable()
-                                        ->reactive() // <-- PENTING
-                                        ->afterStateUpdated(function ($state, Set $set) {
+                                        ->live() // PERBAIKAN 5: Ganti reactive dengan live
+                                        ->afterStateUpdated(function ($state, Set $set, Get $get) {
                                             $barang = Barang::find($state);
                                             if ($barang) {
                                                 $set('harga_satuan', $barang->harga_barang);
+                                                // Update total setelah barang dipilih
+                                                self::updateTotals($get, $set);
                                             }
                                         }),
                                     Forms\Components\TextInput::make('jumlah')
                                         ->required()
-                                        ->numeric(),
-                                        // ->live(debounce: 500), // <-- PENTING
+                                        ->numeric()
+                                        ->live(onBlur: true)
+                                        ->afterStateUpdated(function (Get $get, Set $set) {
+                                            // PERBAIKAN 6: Update total setiap kali jumlah berubah
+                                            self::updateTotals($get, $set);
+                                        })
+                                        ->rules([
+                                            function (Get $get) {
+                                                return function (string $attribute, $value, Closure $fail) use ($get) {
+                                                    $barangId = $get('../barang_id');
+                                                    if (!$barangId) {
+                                                        return;
+                                                    }
+
+                                                    $barang = Barang::find($barangId);
+                                                    if (!$barang) {
+                                                        return;
+                                                    }
+
+                                                    if ($value > $barang->jumlah_stok) {
+                                                        $fail("Stok tidak mencukupi. Stok tersedia: {$barang->jumlah_stok}.");
+                                                    }
+                                                };
+                                            },
+                                        ]),
                                     Forms\Components\TextInput::make('harga_satuan')
                                         ->required()
                                         ->numeric()
                                         ->prefix('Rp')
-                                        ->readOnly(),
-
+                                        ->readOnly()
+                                        ->live() // PERBAIKAN 7: Buat live untuk update otomatis
+                                        ->afterStateUpdated(function (Get $get, Set $set) {
+                                            self::updateTotals($get, $set);
+                                        }),
                                 ])
                                 ->columns(3)
                                 ->defaultItems(1)
                                 ->required()
-                                ->live() // <-- PENTING: Menggantikan reactive() pada repeater
+                                ->live()
                                 ->afterStateUpdated(function (Get $get, Set $set) {
-                                    // Panggil fungsi untuk update total
                                     self::updateTotals($get, $set);
                                 })
                                 ->deleteAction(
+                                    fn(Forms\Components\Actions\Action $action) => $action->after(fn(Get $get, Set $set) => self::updateTotals($get, $set)),
+                                )
+                                ->addAction(
                                     fn(Forms\Components\Actions\Action $action) => $action->after(fn(Get $get, Set $set) => self::updateTotals($get, $set)),
                                 ),
                         ]),
@@ -71,22 +138,39 @@ class TransaksiResource extends Resource
                             Forms\Components\TextInput::make('total_pembayaran')
                                 ->label('Total Belanja')
                                 ->prefix('Rp')
-                                ->readOnly() // <-- Dibuat read-only karena dihitung otomatis
-                                ->numeric(),
+                                ->readOnly()
+                                ->numeric()
+                                ->live(), // PERBAIKAN 8: Buat live
                             Forms\Components\TextInput::make('dibayar')
                                 ->label('Uang Dibayar')
                                 ->prefix('Rp')
                                 ->numeric()
                                 ->required()
-                                ->live(onBlur: true) // <-- PENTING: Update saat fokus hilang
+                                ->live(onBlur: true)
+                                ->rules([ // Tambahkan rules() di sini
+                                    function (Get $get) {
+                                        return function (string $attribute, $value, Closure $fail) use ($get) {
+                                            // Ambil nilai dari total_pembayaran
+                                            $totalBelanja = (float) $get('total_pembayaran');
+                                            $dibayar = (float) $value;
+
+                                            // Bandingkan
+                                            if ($dibayar < $totalBelanja) {
+                                                // Jika kurang, kirim pesan error
+                                                $fail("Jumlah yang dibayar tidak boleh kurang dari total belanja.");
+                                            }
+                                        };
+                                    },
+                                ])
                                 ->afterStateUpdated(function (Get $get, Set $set) {
                                     self::updateTotals($get, $set);
                                 }),
                             Forms\Components\TextInput::make('kembalian')
                                 ->label('Uang Kembalian')
                                 ->prefix('Rp')
-                                ->readOnly() // <-- Dibuat read-only
-                                ->numeric(),
+                                ->readOnly()
+                                ->numeric()
+                                ->live(), // PERBAIKAN 9: Buat live
                         ])
                 ])->columnSpanFull()
             ]);
@@ -94,30 +178,37 @@ class TransaksiResource extends Resource
 
     public static function updateTotals(Get $get, Set $set): void
     {
-        // Ambil semua item barang dari repeater
         $items = $get('items');
         $total = 0;
 
-        // Hitung total dari semua item
         if (is_array($items)) {
             foreach ($items as $item) {
-                // Pastikan jumlah dan harga_satuan ada dan numerik
-                $jumlah = is_numeric($item['jumlah']) ? $item['jumlah'] : 0;
-                $harga = is_numeric($item['harga_satuan']) ? $item['harga_satuan'] : 0;
+                // PERBAIKAN 10: Validasi data lebih ketat
+                if (empty($item['barang_id']) || empty($item['jumlah']) || empty($item['harga_satuan'])) {
+                    continue;
+                }
+
+                $jumlah = is_numeric($item['jumlah']) ? floatval($item['jumlah']) : 0;
+                $harga = is_numeric($item['harga_satuan']) ? floatval($item['harga_satuan']) : 0;
                 $total += $jumlah * $harga;
             }
         }
 
-        // Set nilai 'total_pembayaran'
+        // PERBAIKAN 11: Set dengan logging untuk debugging
         $set('total_pembayaran', $total);
-
-        // Set nilai 'total_harga_barang'
         $set('total_harga_barang', $total);
 
-        // Hitung dan set kembalian
-        $dibayar = is_numeric($get('dibayar')) ? $get('dibayar') : 0;
+        $dibayar = is_numeric($get('dibayar')) ? floatval($get('dibayar')) : 0;
         $kembalian = $dibayar - $total;
         $set('kembalian', $kembalian);
+
+        // DEBUG: Log untuk debugging (hapus setelah fix)
+        Log::info('UpdateTotals called', [
+            'total_harga_barang' => $total,
+            'items_count' => is_array($items) ? count($items) : 0,
+            'dibayar' => $dibayar,
+            'kembalian' => $kembalian
+        ]);
     }
 
     public static function table(Table $table): Table
@@ -132,20 +223,18 @@ class TransaksiResource extends Resource
                 Tables\Columns\TextColumn::make('barangs.nama_barang')
                     ->label('Daftar Barang')
                     ->formatStateUsing(function ($state, $record) {
-                        // Ambil semua nama barang dari relasi dan gabungkan dengan koma
                         return $record->barangs->pluck('nama_barang')->implode(', ');
                     })
                     ->searchable(query: function ($query, string $search) {
-                        // PERBAIKAN: Search berdasarkan nama barang dalam relasi many-to-many
                         return $query->whereHas('barangs', function ($q) use ($search) {
                             $q->where('nama_barang', 'like', "%{$search}%");
                         });
                     })
-                    ->limit(40) // Batasi panjang teks agar UI rapi
-                    ->tooltip(function ($record) { // Tampilkan daftar lengkap saat di-hover
+                    ->limit(40)
+                    ->tooltip(function ($record) {
                         return $record->barangs->pluck('nama_barang')->implode("\n");
                     }),
-                Tables\Columns\TextColumn::make('pembayaran.total_pembayaran')
+                Tables\Columns\TextColumn::make('total_harga_barang')
                     ->label('Total Harga')
                     ->money('IDR')
                     ->sortable(),
@@ -160,13 +249,11 @@ class TransaksiResource extends Resource
             ])
             ->defaultSort('created_at', 'desc')
             ->filters([
-                // Filter berdasarkan kasir
                 Tables\Filters\SelectFilter::make('user_id')
                     ->label('Kasir')
                     ->relationship('kasir', 'name')
                     ->searchable(),
 
-                // Filter berdasarkan barang
                 Tables\Filters\SelectFilter::make('barang')
                     ->label('Barang')
                     ->options(Barang::pluck('nama_barang', 'id'))
@@ -180,7 +267,6 @@ class TransaksiResource extends Resource
                     })
                     ->searchable(),
 
-                // Filter berdasarkan tanggal
                 Tables\Filters\Filter::make('created_at')
                     ->form([
                         Forms\Components\DatePicker::make('dari_tanggal'),
@@ -204,7 +290,6 @@ class TransaksiResource extends Resource
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
-                // Admin bisa edit, kasir tidak
                 Tables\Actions\EditAction::make()
                     ->visible(fn() => auth()->user()->role === 'admin'),
                 Tables\Actions\DeleteAction::make()
@@ -220,9 +305,7 @@ class TransaksiResource extends Resource
 
     public static function getRelations(): array
     {
-        return [
-            // RelationManagers\BarangsRelationManager::class,
-        ];
+        return [];
     }
 
     public static function getPages(): array

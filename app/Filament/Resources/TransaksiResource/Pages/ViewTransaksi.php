@@ -40,11 +40,11 @@ class ViewTransaksi extends ViewRecord
                                 TextEntry::make('id')->label('ID Transaksi'),
                                 TextEntry::make('kasir.name')->label('Nama Kasir'),
                                 TextEntry::make('created_at')->label('Tanggal Transaksi')->dateTime(),
-                                TextEntry::make('pembayaran.total_pembayaran')->label('Total Belanja')->money('IDR'),
+                                TextEntry::make('total_harga_barang')->label('Total Belanja')->money('IDR'),
                                 TextEntry::make('pembayaran.dibayar')->label('Uang Dibayar')->money('IDR'),
                                 TextEntry::make('pembayaran.kembalian')->label('Uang Kembalian')->money('IDR'),
                             ]),
-                            
+
                         // RepeatableEntry untuk daftar barang, diletakkan di bawah Grid
                         RepeatableEntry::make('barangs')
                             ->label('Barang yang Dibeli')
