@@ -47,7 +47,7 @@ class PrediksiResource extends Resource
                     ])
                     ->default(3)
                     ->required(),
-                Forms\Components\DatePicker::make('tanggal_prediksi')
+                Forms\Components\Hidden::make('tanggal_prediksi')
                     ->label('Prediksi untuk Bulan')
                     ->default(now()->addMonth()->startOfMonth())
                     ->required(),
@@ -204,7 +204,7 @@ class PrediksiResource extends Resource
                                         Infolists\Components\TextEntry::make('penjualan_aktual')
                                             ->label('Penjualan Aktual')
                                             ->formatStateUsing(function ($state): string {
-                                                return $state === 0 ? '-' : number_format($state);
+                                                return $state === 0 ? 0 : number_format($state);
                                             }),
 
                                         Infolists\Components\TextEntry::make('stok_aktual')
