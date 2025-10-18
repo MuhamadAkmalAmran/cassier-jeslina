@@ -10,7 +10,7 @@ class ViewHasilPrediksi extends ViewRecord
 {
     protected static string $resource = HasilPrediksiResource::class;
 
-        protected function getHeaderActions(): array
+    protected function getHeaderActions(): array
     {
         return [
             // Tombol "Kembali" baru

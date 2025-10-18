@@ -5,8 +5,9 @@ namespace App\Providers\Filament;
 use App\Filament\Pages\EditProfile;
 use App\Filament\Pages\LaporanPenjualanBulanan;
 use App\Filament\Resources\DashboardResource\Widgets\StatsOverview as WidgetsStatsOverview;
+use App\Filament\Widgets\BarangTerlarisChart as WidgetsBarangTerlarisChart;
+use App\Filament\Widgets\PenjualanBarangBulananChart;
 use App\Filament\Widgets\PenjualanChart;
-use App\Filament\Widgets\StatsOverview; // <-- PERBAIKAN 1
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -47,6 +48,7 @@ class AdminPanelProvider extends PanelProvider
             ->widgets([
                 WidgetsStatsOverview::class,
                 PenjualanChart::class,
+                WidgetsBarangTerlarisChart::class,
             ])
             ->middleware([
                 EncryptCookies::class,
