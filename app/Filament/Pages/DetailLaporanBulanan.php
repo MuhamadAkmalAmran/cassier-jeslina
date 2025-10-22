@@ -3,6 +3,8 @@
 namespace App\Filament\Pages;
 
 use App\Models\Barang;
+use App\Models\HasilPrediksi;
+use App\Models\Prediksi;
 use Filament\Pages\Page;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -21,11 +23,14 @@ class DetailLaporanBulanan extends Page implements HasTable
 
     public ?int $year = null;
     public ?int $month = null;
+    public ?int $nextMonth = null;
 
     public function mount(): void
     {
         $this->year = request()->query('year');
         $this->month = request()->query('month');
+        $this->nextMonth = request()->query('month') + 1;
+
 
         if (!$this->year || !$this->month) {
             redirect(LaporanPenjualanBulanan::getUrl());
@@ -42,33 +47,54 @@ class DetailLaporanBulanan extends Page implements HasTable
         return $table
             ->query(
                 Barang::query()
-                    ->select(
-                        'barangs.nama_barang',
-                        DB::raw('SUM(barang_transaksi.jumlah) AS total_kuantitas'),
-                        DB::raw('SUM(barang_transaksi.jumlah * barang_transaksi.harga_satuan) AS total_nilai'),
-                        'hp.prediksi_stok',
-                        'hp.tanggal'
-                    )
+                    ->select('barangs.nama_barang')
+                    ->selectSub(function ($query) {
+                        $query->from('barang_transaksi')
+                            ->selectRaw('SUM(jumlah)')
+                            ->whereColumn('barang_transaksi.barang_id', 'barangs.id');
+                    }, 'total_kuantitas')
+                    ->selectSub(function ($query) {
+                        $query->from('barang_transaksi')
+                            ->selectRaw('SUM(jumlah * harga_satuan)')
+                            ->whereColumn('barang_transaksi.barang_id', 'barangs.id');
+                    }, 'total_nilai')
+                    ->addSelect(['hp.prediksi_stok', 'hp.tanggal'])
                     ->join('barang_transaksi', 'barangs.id', '=', 'barang_transaksi.barang_id')
-                    ->leftJoin('prediksis AS p', 'barangs.id', '=', 'p.barang_id')
-                    ->leftJoin(DB::raw("
-                                        (
-                                            SELECT h1.*
-                                            FROM hasil_prediksis h1
-                                            INNER JOIN (
-                                                SELECT prediksi_id, MAX(tanggal) AS max_tanggal
-                                                FROM hasil_prediksis
-                                                WHERE YEAR(tanggal) = {$this->year}
-                                                AND MONTH(tanggal) = {$this->month}
-                                                GROUP BY prediksi_id
-                                            ) h2 ON h1.prediksi_id = h2.prediksi_id AND h1.tanggal = h2.max_tanggal
-                                        ) AS hp
-                            "), 'p.id', '=', 'hp.prediksi_id')
+                    ->leftJoinSub(
+                        Prediksi::select('barang_id', DB::raw('MAX(id) AS id'))
+                            ->groupBy('barang_id'),
+                        'p',
+                        'barangs.id',
+                        '=',
+                        'p.barang_id'
+                    )
+                    ->leftJoinSub(
+                        HasilPrediksi::from('hasil_prediksis as h1')
+                            ->joinSub(
+                                HasilPrediksi::select('prediksi_id')
+                                    ->selectRaw('MAX(tanggal) AS max_tanggal')
+                                    ->whereYear('tanggal', $this->year)
+                                    ->whereMonth('tanggal', $this->nextMonth)
+                                    ->groupBy('prediksi_id'),
+                                'h2',
+                                function ($join) {
+                                    $join->on('h1.prediksi_id', '=', 'h2.prediksi_id')
+                                        ->on('h1.tanggal', '=', 'h2.max_tanggal');
+                                }
+                            )
+                            ->select('h1.*'),
+                        'hp',
+                        'p.id',
+                        '=',
+                        'hp.prediksi_id'
+                    )
                     ->whereYear('barang_transaksi.created_at', $this->year)
                     ->whereMonth('barang_transaksi.created_at', $this->month)
                     ->groupBy('barangs.id', 'barangs.nama_barang', 'hp.prediksi_stok', 'hp.tanggal')
-                    ->orderByDesc('hp.tanggal')
+                    ->orderBy('barangs.id', 'asc')
             )
+
+
 
             ->columns([
                 TextColumn::make('nama_barang'),
