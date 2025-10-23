@@ -105,7 +105,10 @@ class DetailLaporanBulanan extends Page implements HasTable
                     ->label('Total Penjualan')
                     ->money('IDR'),
                 TextColumn::make('prediksi_stok')
-                    ->label('Prediksi Stok')
+                    ->label(function () {
+                        $bulan = \Carbon\Carbon::createFromDate($this->year, $this->nextMonth)->translatedFormat('F Y');
+                        return 'Prediksi Stok (' . $bulan . ')';
+                    })
                     ->numeric()
                     ->default(0), // Tampilkan 0 jika tidak ada data prediksi
             ])
